@@ -1,0 +1,9 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+.env
+chords_images/
+gifs/
+images/
+photo/
