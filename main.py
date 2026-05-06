@@ -6,6 +6,8 @@ from aiogram.filters import Command
 from bot_folder.handlers import cmd_start, cmd_help, cmd_chord
 from bot_folder.messages_handler import handle_messages
 from dotenv import load_dotenv
+from bot_folder.messages_handler import handle_messages, handle_callback
+
 
 load_dotenv()
 
@@ -20,7 +22,7 @@ dp.message.register(cmd_start, Command("start"))
 dp.message.register(cmd_help, Command("help"))
 dp.message.register(cmd_chord, Command("chord"))
 
-
+dp.callback_query.register(handle_callback)
 dp.message.register(handle_messages)
 
 async def main():
