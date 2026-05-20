@@ -1,11 +1,84 @@
 import os
 import asyncio
 import random
+import psycopg2
 from aiogram.types import FSInputFile, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot_folder.keyboards import get_main_keyboard
 from bot_folder.amdm_parser import AmDm
+from psycopg2.extras import RealDictCursor
 
-favorites = {}
+DB_HOST = "185.247.17.9"
+DB_PORT = "5432"
+DB_NAME = "price_tracker"
+DB_USER = "user"
+DB_PASSWORD = "1234"
+
+
+def get_db_connection():
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+
+
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS favorites (
+            user_id BIGINT,
+            artist TEXT,
+            title TEXT,
+            PRIMARY KEY (user_id, artist, title)
+        )
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def add_favorite(user_id, artist, title):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            'INSERT INTO favorites (user_id, artist, title) VALUES (%s, %s, %s)',
+            (user_id, artist, title)
+        )
+        conn.commit()
+    except psycopg2.IntegrityError:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_favorites(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute('SELECT artist, title FROM favorites WHERE user_id = %s', (user_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{'artist': row['artist'], 'title': row['title']} for row in rows]
+
+
+def remove_favorite(user_id, artist, title):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'DELETE FROM favorites WHERE user_id = %s AND artist = %s AND title = %s',
+        (user_id, artist, title)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+init_db()
 
 amdm = AmDm()
 
@@ -32,11 +105,13 @@ RANDOM_SONGS = [
     "Агата Кристи как на войне",
 ]
 
+
 def get_image(image_name):
     path = f"images/buttons/{image_name}"
     if os.path.exists(path):
         return FSInputFile(path)
     return None
+
 
 def get_song_gif():
     path = "gifs/guitar.gif"
@@ -90,27 +165,34 @@ async def handle_messages(message):
 
     elif text == "избранное":
         user_id = message.from_user.id
+        favorites_list = get_favorites(user_id)
 
-        if user_id not in favorites or not favorites[user_id]:
+        if not favorites_list:
             await message.answer(
-                "У тебя пока нет избранных песен, бро!\n\n"
+                "📭 У тебя пока нет избранных песен, бро!\n\n"
                 "Когда найдёшь песню — нажми ❤️ В избранное",
                 reply_markup=get_main_keyboard()
             )
             return
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
-        for song in favorites[user_id]:
+        for song in favorites_list:
+            # ДВЕ КНОПКИ: 🎸 Название и ❌ Удалить
             keyboard.inline_keyboard.append([
                 InlineKeyboardButton(
                     text=f"🎸 {song['artist']} - {song['title']}",
                     callback_data=f"fav_{song['artist']}_{song['title']}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Удалить",
+                    callback_data=f"del_{song['artist']}_{song['title']}"
                 )
             ])
 
-        await message.answer("📋 **Твои любимые песни:**\n\nНажми на любую — я найду аккорды!",
-                             reply_markup=keyboard,
-                             parse_mode="Markdown")
+        await message.answer(
+            "📋 **Твои любимые песни:**\n\nНажми на песню — найду аккорды.\nНажми ❌ Удалить — удалю из избранного.",
+            reply_markup=keyboard,
+            parse_mode="Markdown")
 
     elif text == "случайная песня":
         dice_message = await message.answer_dice(emoji="🎲")
@@ -231,21 +313,40 @@ async def handle_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
 
+    if data.startswith("del_"):
+        _, artist, title = data.split("_", 2)
+        remove_favorite(user_id, artist, title)
+        await callback.answer("🗑 Удалено из избранного!", show_alert=True)
+
+        favorites_list = get_favorites(user_id)
+        if not favorites_list:
+            await callback.message.edit_text("📭 Избранное пусто!")
+            return
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+        for song in favorites_list:
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🎸 {song['artist']} - {song['title']}",
+                    callback_data=f"fav_{song['artist']}_{song['title']}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Удалить",
+                    callback_data=f"del_{song['artist']}_{song['title']}"
+                )
+            ])
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+        return
+
+    # ===== СОХРАНЕНИЕ В ИЗБРАННОЕ =====
     if data.startswith("save_"):
         _, artist, title = data.split("_", 2)
+        add_favorite(user_id, artist, title)
+        await callback.answer("❤️ Добавлено в избранное!", show_alert=True)
+        return
 
-        if user_id not in favorites:
-            favorites[user_id] = []
-
-        for song in favorites[user_id]:
-            if song['artist'] == artist and song['title'] == title:
-                await callback.answer("уже есть в избранном!", show_alert=True)
-                return
-
-        favorites[user_id].append({'artist': artist, 'title': title})
-        await callback.answer("Добавлено в избранное!", show_alert=True)
-
-    elif data.startswith("fav_"):
+    # ===== ПОИСК ПЕСНИ ИЗ ИЗБРАННОГО =====
+    if data.startswith("fav_"):
         _, artist, title = data.split("_", 2)
         await callback.message.answer(f"🔍 Ищу: {artist} - {title}")
 
@@ -273,7 +374,7 @@ async def handle_callback(callback: CallbackQuery):
                 response = response[:3950] + "\n\n... аккорды обрезаны"
 
             fav_button = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="В избранное", callback_data=f"save_{song['artist']}_{song['title']}")]
+                [InlineKeyboardButton(text="❤️", callback_data=f"save_{song['artist']}_{song['title']}")]
             ])
 
             song_gif = get_song_gif()
