@@ -1,14 +1,35 @@
 import re
+import time
 import requests
 from bs4 import BeautifulSoup
+
 
 class AmDm:
     def __init__(self):
         pass
 
     def get_chords_list(self, query):
-        result = requests.post('http://amdm.ru/search/?q={}'.format(
-            re.sub(r'\s', '+', query)))
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        }
+
+        try:
+            result = requests.post(
+                'http://amdm.ru/search/?q={}'.format(re.sub(r'\s', '+', query)),
+                headers=headers,
+                timeout=10
+            )
+        except Exception as e:
+            print(f"Ошибка запроса: {e}")
+            return False
+
+        # Если статус не 200, возвращаем False
+        if result.status_code != 200:
+            print(f"Статус {result.status_code}, сайт недоступен")
+            return False
+
         soup = BeautifulSoup(result.content, "html.parser")
         table = soup.find_all("table", "items")
 
@@ -36,7 +57,21 @@ class AmDm:
         return results
 
     def get_chords_song(self, url):
-        song = requests.get(url)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        }
+
+        try:
+            song = requests.get(url, headers=headers, timeout=10)
+        except Exception as e:
+            print(f"Ошибка запроса: {e}")
+            return "аккорды не найдены (ошибка соединения)"
+
+        if song.status_code != 200:
+            return f"аккорды не найдены (статус {song.status_code})"
+
         soup = BeautifulSoup(song.content, "html.parser")
 
         content = soup.find_all("pre", {"itemprop": "chordsBlock"})
