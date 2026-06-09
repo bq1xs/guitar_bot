@@ -25,7 +25,6 @@ class AmDm:
             print(f"Ошибка запроса: {e}")
             return False
 
-        # Если статус не 200, возвращаем False
         if result.status_code != 200:
             print(f"Статус {result.status_code}, сайт недоступен")
             return False
